@@ -132,25 +132,55 @@ type VolumeMount struct {
 
 // SandboxInfo holds details about a sandbox.
 type SandboxInfo struct {
-	ID           string           `json:"sandboxID"`
-	Alias        string           `json:"alias,omitempty"`
-	ClientID     string           `json:"clientID,omitempty"`
-	Template     string           `json:"templateID"`
-	State        string           `json:"state"`
-	CPUCount     int              `json:"cpuCount"`
-	MemoryMB     int              `json:"memoryMB"`
-	DiskSizeMB   int              `json:"diskSizeMB"`
-	StartedAt    string           `json:"startedAt"`
-	EndAt        string           `json:"endAt,omitempty"`
-	EnvdVersion  string           `json:"envdVersion,omitempty"`
-	Lifecycle    SandboxLifecycle `json:"lifecycle,omitempty"`
-	VolumeMounts []VolumeMount    `json:"volumeMounts,omitempty"`
-	Network      *NetworkConfig   `json:"network,omitempty"`
+	ID           string            `json:"sandboxID"`
+	Alias        string            `json:"alias,omitempty"`
+	ClientID     string            `json:"clientID,omitempty"`
+	Template     string            `json:"templateID"`
+	State        string            `json:"state"`
+	CPUCount     int               `json:"cpuCount"`
+	MemoryMB     int               `json:"memoryMB"`
+	DiskSizeMB   int               `json:"diskSizeMB"`
+	StartedAt    string            `json:"startedAt"`
+	EndAt        string            `json:"endAt,omitempty"`
+	EnvdVersion  string            `json:"envdVersion,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Lifecycle    SandboxLifecycle  `json:"lifecycle,omitempty"`
+	VolumeMounts []VolumeMount     `json:"volumeMounts,omitempty"`
+	Network      *NetworkConfig    `json:"network,omitempty"`
 }
 
 // envdBaseURL returns the base URL of the sandbox environment daemon.
 func (s *Sandbox) envdBaseURL() string {
 	return fmt.Sprintf("https://%d-%s.%s", envdPort, s.ID, s.client.sandboxDomain)
+}
+
+// IsRunning checks whether the sandbox's envd daemon is healthy and
+// responding. It calls the /health endpoint on the sandbox data plane.
+// Returns true when the sandbox is running and ready to accept requests.
+func (s *Sandbox) IsRunning() (bool, error) {
+	return s.IsRunningWithContext(context.Background())
+}
+
+// IsRunningWithContext checks the sandbox health using the provided context.
+// Returns true if envd responds with 200 or 204.
+func (s *Sandbox) IsRunningWithContext(ctx context.Context) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.envdBaseURL()+"/health", nil)
+	if err != nil {
+		return false, fmt.Errorf("e2b: build health request: %w", err)
+	}
+
+	resp, err := s.client.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("e2b: send health request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // Close destroys the sandbox, freeing all associated resources.
